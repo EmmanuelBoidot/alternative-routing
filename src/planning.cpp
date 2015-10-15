@@ -32,17 +32,25 @@
 *  POSSIBILITY OF SUCH DAMAGE.
 *********************************************************************/
 
-/* Author: Luis G. Torres */
+/* Author: Luis G. Torres, Jonathan Gammell */
 
 #include <ompl/base/SpaceInformation.h>
 #include <ompl/base/objectives/PathLengthOptimizationObjective.h>
 #include <ompl/base/objectives/StateCostIntegralObjective.h>
 #include <ompl/base/objectives/MaximizeMinClearanceObjective.h>
 #include <ompl/base/spaces/RealVectorStateSpace.h>
-//#include <ompl/geometric/planners/rrt/RRTstar.h>
-#include "RRTstarAR.h"
+// For ompl::msg::setLogLevel
+#include "ompl/util/Console.h"
+
+// For boost program options
+#include <boost/program_options.hpp>
+// For string comparison (boost::iequals)
+#include <boost/algorithm/string.hpp>
+// For boost::make_shared
+#include <boost/make_shared.hpp>
 
 #include <fstream>
+#include "RRTsharp.h"
 
 namespace ob = ompl::base;
 namespace og = ompl::geometric;
@@ -142,7 +150,7 @@ void plan(int argc, char** argv)
     // pdef->setOptimizationObjective(getPathLengthObjWithCostToGo(si));
 
     // Construct our optimal planner using the RRTstar algorithm.
-    ob::PlannerPtr optimizingPlanner(new og::RRTstarAR(si));
+    ob::PlannerPtr optimizingPlanner(new og::RRTsharp(si));
 
     // Set the problem instance for our planner to solve
     optimizingPlanner->setProblemDefinition(pdef);
@@ -157,7 +165,9 @@ void plan(int argc, char** argv)
         // Output the length of the path found
         std::cout
             << "Found solution of path length "
-            << pdef->getSolutionPath()->length() << std::endl;
+            << pdef->getSolutionPath()->length()
+        	<< " with an optimization objective value of "
+            << pdef->getSolutionPath()->cost(pdef->getOptimizationObjective()) << std::endl;
 
         // If a filename was specified, output the path as a matrix to
         // that file for visualization
