@@ -50,7 +50,7 @@
 #include <boost/make_shared.hpp>
 
 #include <fstream>
-#include "RRTstarAR.h"
+#include "RRTsharp.h"
 
 namespace ob = ompl::base;
 namespace og = ompl::geometric;
@@ -103,7 +103,7 @@ ob::OptimizationObjectivePtr getBalancedObjective2(const ob::SpaceInformationPtr
 
 ob::OptimizationObjectivePtr getPathLengthObjWithCostToGo(const ob::SpaceInformationPtr& si);
 
-void plan(int argc, char** argv)
+void sharp_plan(int argc, char** argv)
 {
     // Construct the robot state space in which we're planning. We're
     // planning in [0,1]x[0,1], a subset of R^2.
@@ -149,8 +149,8 @@ void plan(int argc, char** argv)
     // pdef->setOptimizationObjective(getBalancedObjective2(si));
     // pdef->setOptimizationObjective(getPathLengthObjWithCostToGo(si));
 
-    // Construct our optimal planner using the RRTstarAR algorithm.
-    ob::PlannerPtr optimizingPlanner(new og::RRTstarAR(si));
+    // Construct our optimal planner using the RRTstar algorithm.
+    ob::PlannerPtr optimizingPlanner(new og::RRTsharp(si));
 
     // Set the problem instance for our planner to solve
     optimizingPlanner->setProblemDefinition(pdef);
@@ -185,7 +185,7 @@ void plan(int argc, char** argv)
 
 int main(int argc, char** argv)
 {
-    plan(argc, argv);
+    sharp_plan(argc, argv);
 
     return 0;
 }

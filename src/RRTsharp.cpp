@@ -32,7 +32,8 @@
 *  POSSIBILITY OF SUCH DAMAGE.
 *********************************************************************/
 
-/* Authors: Alejandro Perez, Sertac Karaman, Ryan Luna, Luis G. Torres, Ioan Sucan, Javier V Gomez */
+/* Based on RRTstar by: Alejandro Perez, Sertac Karaman, Ryan Luna, Luis G. Torres, Ioan Sucan, Javier V Gomez */
+/* Author: Emmanuel Boidot */
 
 #include "RRTsharp.h"
 #include "ompl/base/goals/GoalSampleableRegion.h"
@@ -41,7 +42,7 @@
 #include <algorithm>
 #include <limits>
 #include <boost/math/constants/constants.hpp>
-#include <queue>
+#include <set>
 
 ompl::geometric::RRTsharp::RRTsharp(const base::SpaceInformationPtr &si) :
     base::Planner(si, "RRTsharp"),
@@ -239,105 +240,112 @@ ompl::base::PlannerStatus ompl::geometric::RRTsharp::solve(const base::PlannerTe
             motion->parent = nmotion;
             motion->incCost = opt_->motionCost(nmotion->state, motion->state);
             motion->cost = opt_->combineCosts(nmotion->cost, motion->incCost);
+            statesGenerated++;
+
+            std::priority_queue< MotionCandidate > nodesToAnalyzeForRewiring;
+            std::set< Motion* > visitedMotions;
+            std::set< Motion* > toVisitMotions;
+//            std::cout << "reset priority queue" << std::endl;
 
             // Find nearby neighbors of the new motion - k-nearest RRT*
             unsigned int k = std::ceil(k_rrg * log((double)(nn_->size() + 1)));
-            nn_->nearestK(motion, k, nbh);
-            rewireTest += nbh.size();
-            statesGenerated++;
-
-            // cache for distance computations
-            //
-            // Our cost caches only increase in size, so they're only
-            // resized if they can't fit the current neighborhood
-            if (costs.size() < nbh.size())
-            {
-                costs.resize(nbh.size());
-                incCosts.resize(nbh.size());
-                sortedCostIndices.resize(nbh.size());
-            }
-
-            // cache for motion validity (only useful in a symmetric space)
-            //
-            // Our validity caches only increase in size, so they're
-            // only resized if they can't fit the current neighborhood
-            if (valid.size() < nbh.size())
-                valid.resize(nbh.size());
-            std::fill(valid.begin(), valid.begin() + nbh.size(), 0);
-
-            // Finding the nearest neighbor to connect to
-            // By default, neighborhood states are sorted by cost, and collision checking
-            // is performed in increasing order of cost
-            if (delayCC_)
-            {
-                // calculate all costs and distances
-                for (std::size_t i = 0 ; i < nbh.size(); ++i)
-                {
-                    incCosts[i] = opt_->motionCost(nbh[i]->state, motion->state);
-                    costs[i] = opt_->combineCosts(nbh[i]->cost, incCosts[i]);
-                }
-
-                // sort the nodes
-                //
-                // we're using index-value pairs so that we can get at
-                // original, unsorted indices
-                for (std::size_t i = 0; i < nbh.size(); ++i)
-                    sortedCostIndices[i] = i;
-                std::sort(sortedCostIndices.begin(), sortedCostIndices.begin() + nbh.size(),
-                          compareFn);
-
-                // collision check until a valid motion is found
-                //
-                // ASYMMETRIC CASE: it's possible that none of these
-                // neighbors are valid. This is fine, because motion
-                // already has a connection to the tree through
-                // nmotion (with populated cost fields!).
-                for (std::vector<std::size_t>::const_iterator i = sortedCostIndices.begin();
-                     i != sortedCostIndices.begin() + nbh.size();
-                     ++i)
-                {
-                    if (nbh[*i] == nmotion || si_->checkMotion(nbh[*i]->state, motion->state))
-                    {
-                        motion->incCost = incCosts[*i];
-                        motion->cost = costs[*i];
-                        motion->parent = nbh[*i];
-                        valid[*i] = 1;
-                        break;
-                    }
-                    else valid[*i] = -1;
-                }
-            }
-            else // if not delayCC
-            {
-                motion->incCost = opt_->motionCost(nmotion->state, motion->state);
-                motion->cost = opt_->combineCosts(nmotion->cost, motion->incCost);
-                // find which one we connect the new state to
-                for (std::size_t i = 0 ; i < nbh.size(); ++i)
-                {
-                    if (nbh[i] != nmotion)
-                    {
-                        incCosts[i] = opt_->motionCost(nbh[i]->state, motion->state);
-                        costs[i] = opt_->combineCosts(nbh[i]->cost, incCosts[i]);
-                        if (opt_->isCostBetterThan(costs[i], motion->cost))
-                        {
-                            if (si_->checkMotion(nbh[i]->state, motion->state))
-                            {
-                                motion->incCost = incCosts[i];
-                                motion->cost = costs[i];
-                                motion->parent = nbh[i];
-                                valid[i] = 1;
-                            }
-                            else valid[i] = -1;
-                        }
-                    }
-                    else
-                    {
-                        incCosts[i] = motion->incCost;
-                        costs[i] = motion->cost;
-                        valid[i] = 1;
-                    }
-                }
-            }
+            bool checkForSolution = false;
+            addRewireCandidates(nmotion,k,rewireTest,nbh,costs,incCosts,sortedCostIndices,valid,motion,nodesToAnalyzeForRewiring,checkForSolution,visitedMotions,toVisitMotions);
+//            nn_->nearestK(motion, k, nbh);
+//            rewireTest += nbh.size();
+//
+//            // cache for distance computations
+//            //
+//            // Our cost caches only increase in size, so they're only
+//            // resized if they can't fit the current neighborhood
+//            if (costs.size() < nbh.size())
+//            {
+//                costs.resize(nbh.size());
+//                incCosts.resize(nbh.size());
+//                sortedCostIndices.resize(nbh.size());
+//            }
+//
+//            // cache for motion validity (only useful in a symmetric space)
+//            //
+//            // Our validity caches only increase in size, so they're
+//            // only resized if they can't fit the current neighborhood
+//            if (valid.size() < nbh.size())
+//                valid.resize(nbh.size());
+//            std::fill(valid.begin(), valid.begin() + nbh.size(), 0);
+//
+//            // Finding the nearest neighbor to connect to
+//            // By default, neighborhood states are sorted by cost, and collision checking
+//            // is performed in increasing order of cost
+//            if (delayCC_)
+//            {
+//                // calculate all costs and distances
+//                for (std::size_t i = 0 ; i < nbh.size(); ++i)
+//                {
+//                    incCosts[i] = opt_->motionCost(nbh[i]->state, motion->state);
+//                    costs[i] = opt_->combineCosts(nbh[i]->cost, incCosts[i]);
+//                }
+//
+//                // sort the nodes
+//                //
+//                // we're using index-value pairs so that we can get at
+//                // original, unsorted indices
+//                for (std::size_t i = 0; i < nbh.size(); ++i)
+//                    sortedCostIndices[i] = i;
+//                std::sort(sortedCostIndices.begin(), sortedCostIndices.begin() + nbh.size(),
+//                          compareFn);
+//
+//                // collision check until a valid motion is found
+//                //
+//                // ASYMMETRIC CASE: it's possible that none of these
+//                // neighbors are valid. This is fine, because motion
+//                // already has a connection to the tree through
+//                // nmotion (with populated cost fields!).
+//                for (std::vector<std::size_t>::const_iterator i = sortedCostIndices.begin();
+//                     i != sortedCostIndices.begin() + nbh.size();
+//                     ++i)
+//                {
+//                    if (nbh[*i] == nmotion || si_->checkMotion(nbh[*i]->state, motion->state))
+//                    {
+//                        motion->incCost = incCosts[*i];
+//                        motion->cost = costs[*i];
+//                        motion->parent = nbh[*i];
+//                        valid[*i] = 1;
+//                        break;
+//                    }
+//                    else valid[*i] = -1;
+//                }
+//            }
+//            else // if not delayCC
+//            {
+//                motion->incCost = opt_->motionCost(nmotion->state, motion->state);
+//                motion->cost = opt_->combineCosts(nmotion->cost, motion->incCost);
+//                // find which one we connect the new state to
+//                for (std::size_t i = 0 ; i < nbh.size(); ++i)
+//                {
+//                    if (nbh[i] != nmotion)
+//                    {
+//                        incCosts[i] = opt_->motionCost(nbh[i]->state, motion->state);
+//                        costs[i] = opt_->combineCosts(nbh[i]->cost, incCosts[i]);
+//                        if (opt_->isCostBetterThan(costs[i], motion->cost))
+//                        {
+//                            if (si_->checkMotion(nbh[i]->state, motion->state))
+//                            {
+//                                motion->incCost = incCosts[i];
+//                                motion->cost = costs[i];
+//                                motion->parent = nbh[i];
+//                                valid[i] = 1;
+//                            }
+//                            else valid[i] = -1;
+//                        }
+//                    }
+//                    else
+//                    {
+//                        incCosts[i] = motion->incCost;
+//                        costs[i] = motion->cost;
+//                        valid[i] = 1;
+//                    }
+//                }
+//            }
 
             if (prune_)
             {
@@ -360,57 +368,48 @@ ompl::base::PlannerStatus ompl::geometric::RRTsharp::solve(const base::PlannerTe
                 nn_->add(motion);
                 motion->parent->children.push_back(motion);
             }
+//            std::cout << "Added Motion* :" << motion << "\n";
+//            std::cout << nodesToAnalyzeForRewiring.size() << "/" << nn_->size() << std::endl;
 
-            bool checkForSolution = false;
-            std::priority_queue< MotionCostPair > nodesToAnalyzeForRewiring;
-            for (std::size_t i = 0; i < nbh.size(); ++i){
-            	if (nbh[i] != motion->parent){
-            		nodesToAnalyzeForRewiring.push(MotionCostPair(nbh[i],incCosts[i]));
-            	}
-            }
-//            while (!nodesToAnalyzeForRewiring.empty()){
-////            	MotionCostPair mcp = nodesToAnalyzeForRewiring.top();
-//            	std::cout << nodesToAnalyzeForRewiring.top().second.value() << ' ';
-//            	nodesToAnalyzeForRewiring.pop();
-//            }
-//            std::cout << std::endl;
-
-            for (std::size_t i = 0; i < nbh.size(); ++i)
+            while (!nodesToAnalyzeForRewiring.empty())
             {
-                if (nbh[i] != motion->parent)
+            	MotionCandidate mc = nodesToAnalyzeForRewiring.top();
+            	nodesToAnalyzeForRewiring.pop();
+                if (mc.motionptr != mc.parent_motionptr->parent)
                 {
                     base::Cost nbhIncCost;
                     if (symCost)
-                        nbhIncCost = incCosts[i];
+                        nbhIncCost = mc.incCost;
                     else
-                        nbhIncCost = opt_->motionCost(motion->state, nbh[i]->state);
-                    base::Cost nbhNewCost = opt_->combineCosts(motion->cost, nbhIncCost);
-                    if (opt_->isCostBetterThan(nbhNewCost, nbh[i]->cost))
-                    {
-                        bool motionValid;
-                        if (valid[i] == 0)
-                            motionValid = si_->checkMotion(motion->state, nbh[i]->state);
-                        else
-                            motionValid = (valid[i] == 1);
+                        nbhIncCost = opt_->motionCost(mc.parent_motionptr->state, mc.motionptr->state);
 
-                        if (motionValid)
-                        {
+                    base::Cost nbhNewCost = opt_->combineCosts(mc.parent_motionptr->cost, nbhIncCost);
+                    if (opt_->isCostBetterThan(nbhNewCost, mc.motionptr->cost))
+                    {
+
+//                        if (motionValid)
+//                        {
                             // Remove this node from its parent list
-                            removeFromParent (nbh[i]);
+                            removeFromParent (mc.motionptr);
 
                             // Add this node to the new parent
-                            nbh[i]->parent = motion;
-                            nbh[i]->incCost = nbhIncCost;
-                            nbh[i]->cost = nbhNewCost;
-                            nbh[i]->parent->children.push_back(nbh[i]);
+                            mc.motionptr->parent = mc.parent_motionptr;
+                            mc.motionptr->incCost = nbhIncCost;
+                            mc.motionptr->cost = nbhNewCost;
+                            mc.motionptr->parent->children.push_back(mc.motionptr);
 
                             // Update the costs of the node's children
-                            updateChildCosts(nbh[i]);
+                            updateChildCosts(mc.motionptr);
+
+                            addRewireCandidates(mc.motionptr->parent,k,rewireTest,nbh,costs,incCosts,sortedCostIndices,valid,mc.motionptr,nodesToAnalyzeForRewiring,checkForSolution,visitedMotions,toVisitMotions);
 
                             checkForSolution = true;
-                        }
+//                        }
+                          // find neighbors of this node
                     }
                 }
+//                std::cout << "Rewiring " << mc.motionptr << std::endl;
+//                std::cout << nodesToAnalyzeForRewiring.size() << "/" << nn_->size() << std::endl;
             }
 
             // Add the new motion to the goalMotion_ list, if it satisfies the goal
@@ -478,6 +477,13 @@ ompl::base::PlannerStatus ompl::geometric::RRTsharp::solve(const base::PlannerTe
                 approximation = motion;
                 approximatedist = distanceFromGoal;
             }
+
+//            if (nodesToAnalyzeForRewiring.empty())
+//            	break;
+//            else {
+//            	motion = nodesToAnalyzeForRewiring.top().first;
+//            	nodesToAnalyzeForRewiring.pop();
+//            }
         }
 
         // terminate if a sufficient solution is found
@@ -656,4 +662,140 @@ ompl::base::Cost ompl::geometric::RRTsharp::costToGo(const Motion *motion, const
 
     const base::Cost costToGo = base::goalRegionCostToGo(motion->state, pdef_->getGoal().get()); // h_g
     return opt_->combineCosts(costToCome, costToGo); // h_s + h_g
+}
+
+void ompl::geometric::RRTsharp::addRewireCandidates(
+				Motion* nmotion,
+				unsigned int k,
+				unsigned int &rewireTest,
+				std::vector<Motion*> &nbh,
+				std::vector<base::Cost> &costs,
+				std::vector<base::Cost> &incCosts,
+				std::vector<std::size_t> &sortedCostIndices,
+				std::vector<int> &valid,
+				Motion* motion,
+				std::priority_queue<MotionCandidate> &nodesToAnalyzeForRewiring,
+				bool &checkForSolution,
+				std::set< Motion* > visitedMotions,
+				std::set< Motion* > toVisitMotions)
+	{
+	CostIndexCompare compareFn(costs, *opt_);
+	if (!nmotion)
+		nmotion = motion->parent;
+
+	nn_->nearestK(motion, k, nbh);
+	rewireTest += nbh.size();
+
+	// cache for distance computations
+	//
+	// Our cost caches only increase in size, so they're only
+	// resized if they can't fit the current neighborhood
+	if (costs.size() < nbh.size())
+	{
+		costs.resize(nbh.size());
+		incCosts.resize(nbh.size());
+		sortedCostIndices.resize(nbh.size());
+	}
+
+	// cache for motion validity (only useful in a symmetric space)
+	//
+	// Our validity caches only increase in size, so they're
+	// only resized if they can't fit the current neighborhood
+	if (valid.size() < nbh.size())
+		valid.resize(nbh.size());
+	std::fill(valid.begin(), valid.begin() + nbh.size(), 0);
+
+	// Finding the nearest neighbor to connect to
+	// By default, neighborhood states are sorted by cost, and collision checking
+	// is performed in increasing order of cost
+	if (delayCC_)
+	{
+		// calculate all costs and distances
+		for (std::size_t i = 0 ; i < nbh.size(); ++i)
+		{
+			incCosts[i] = opt_->motionCost(nbh[i]->state, motion->state);
+			costs[i] = opt_->combineCosts(nbh[i]->cost, incCosts[i]);
+		}
+
+		// sort the nodes
+		//
+		// we're using index-value pairs so that we can get at
+		// original, unsorted indices
+		for (std::size_t i = 0; i < nbh.size(); ++i)
+			sortedCostIndices[i] = i;
+		std::sort(sortedCostIndices.begin(), sortedCostIndices.begin() + nbh.size(),
+				  compareFn);
+
+		// collision check until a valid motion is found
+		//
+		// ASYMMETRIC CASE: it's possible that none of these
+		// neighbors are valid. This is fine, because motion
+		// already has a connection to the tree through
+		// nmotion (with populated cost fields!).
+		for (std::vector<std::size_t>::const_iterator i = sortedCostIndices.begin();
+			 i != sortedCostIndices.begin() + nbh.size();
+			 ++i)
+		{
+			if (nbh[*i] == nmotion || si_->checkMotion(nbh[*i]->state, motion->state))
+			{
+				motion->incCost = incCosts[*i];
+				motion->cost = costs[*i];
+				motion->parent = nbh[*i];
+				motion->visited = true;
+				visitedMotions.insert(motion);
+				valid[*i] = 1;
+				break;
+			}
+			else valid[*i] = -1;
+		}
+	}
+	else // if not delayCC
+	{
+		motion->incCost = opt_->motionCost(nmotion->state, motion->state);
+		motion->cost = opt_->combineCosts(nmotion->cost, motion->incCost);
+		// find which one we connect the new state to
+		for (std::size_t i = 0 ; i < nbh.size(); ++i)
+		{
+			if (nbh[i] != nmotion)
+			{
+				incCosts[i] = opt_->motionCost(nbh[i]->state, motion->state);
+				costs[i] = opt_->combineCosts(nbh[i]->cost, incCosts[i]);
+				if (opt_->isCostBetterThan(costs[i], motion->cost))
+				{
+					if (si_->checkMotion(nbh[i]->state, motion->state))
+					{
+						motion->incCost = incCosts[i];
+						motion->cost = costs[i];
+						motion->parent = nbh[i];
+						motion->visited = true;
+						visitedMotions.insert(motion);
+						valid[i] = 1;
+					}
+					else valid[i] = -1;
+				}
+			}
+			else
+			{
+				incCosts[i] = motion->incCost;
+				costs[i] = motion->cost;
+				valid[i] = 1;
+				motion->visited = true;
+				visitedMotions.insert(motion);
+			}
+		}
+	}
+
+    for (std::size_t i = 0; i < nbh.size(); ++i){
+    	bool motionValid;
+		if (valid[i] == 0)
+			motionValid = si_->checkMotion(motion->state, nbh[i]->state);
+		else
+			motionValid = (valid[i] == 1);
+
+    	if (visitedMotions.count(motion)==0 && toVisitMotions.count(motion)==0 && motionValid && nbh[i] != motion->parent){
+    		nodesToAnalyzeForRewiring.push(MotionCandidate(motion,nbh[i],incCosts[i]));
+    		toVisitMotions.insert(motion);
+    	}
+    }
+	return;
 }

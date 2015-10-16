@@ -32,18 +32,21 @@
 *  POSSIBILITY OF SUCH DAMAGE.
 *********************************************************************/
 
-/* Authors: Alejandro Perez, Sertac Karaman, Ryan Luna, Luis G. Torres, Ioan Sucan, Javier V Gomez */
+/* Based on RRTstar by: Alejandro Perez, Sertac Karaman, Ryan Luna, Luis G. Torres, Ioan Sucan, Javier V Gomez */
+/* Author: Emmanuel Boidot */
 
 #ifndef OMPL_GEOMETRIC_PLANNERS_RRT_RRTsharp_
 #define OMPL_GEOMETRIC_PLANNERS_RRT_RRTsharp_
 
 #include "ompl/geometric/planners/PlannerIncludes.h"
+#include "ompl/geometric/planners/rrt/RRTstar.h"
 #include "ompl/base/OptimizationObjective.h"
 #include "ompl/datastructures/NearestNeighbors.h"
 
 #include <limits>
 #include <vector>
 #include <utility>
+#include <queue>
 
 
 namespace ompl
@@ -195,7 +198,8 @@ namespace ompl
                 /** \brief Constructor that allocates memory for the state. This constructor automatically allocates memory for \e state, \e cost, and \e incCost */
                 Motion(const base::SpaceInformationPtr &si) :
                     state(si->allocState()),
-                    parent(NULL)
+                    parent(NULL),
+					visited(false)
                 {
                 }
 
@@ -217,6 +221,8 @@ namespace ompl
 
                 /** \brief The set of motions descending from the current motion */
                 std::vector<Motion*> children;
+
+                bool			  visited;
             };
 
             /** \brief Free the memory allocated by this planner */
@@ -327,6 +333,58 @@ namespace ompl
                     return (this->second.value() > comp.second.value());
                 }
             };
+
+            class MotionCandidate
+			{
+			public:
+            	MotionCandidate(Motion *p, Motion *m, const base::Cost &c){
+            		parent_motionptr = p;
+					motionptr = m;
+					incCost = c;
+					cost = base::Cost(std::numeric_limits<double>::quiet_NaN());
+					valid = true;
+				}
+            	MotionCandidate(Motion *p, Motion *m, const base::Cost &c, const base::Cost &c2){
+            		parent_motionptr = p;
+					motionptr = m;
+					incCost = c;
+					cost = c2;
+					valid = true;
+				}
+            	MotionCandidate(Motion *p, Motion *m, const base::Cost &c, const base::Cost &c2, bool isValid){
+            		parent_motionptr = p;
+					motionptr = m;
+					incCost = c;
+					cost = c2;
+					valid = isValid;
+				}
+
+				bool operator<(const MotionCandidate &comp) const
+				{
+					return (incCost.value() > incCost.value());
+				}
+
+				Motion* parent_motionptr;
+				Motion* motionptr;
+				base::Cost incCost;
+				base::Cost cost;
+				bool valid;
+			};
+
+            void addRewireCandidates(
+            				Motion* nmotion,
+							unsigned int k,
+							unsigned int &rewireTest,
+            				std::vector<Motion*> &nbh,
+            				std::vector<base::Cost> &costs,
+            				std::vector<base::Cost> &incCosts,
+            				std::vector<std::size_t> &sortedCostIndices,
+            				std::vector<int> &valid,
+            				Motion* motion,
+							std::priority_queue< MotionCandidate > &nodesToAnalyzeForRewiring,
+							bool &checkForSolution,
+							std::set<Motion*> visitedMotions,
+							std::set< Motion* > toVisitMotions);
         };
     }
 }
